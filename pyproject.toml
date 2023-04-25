@@ -1,0 +1,51 @@
+[build-system]
+build-backend = "flit_core.buildapi"
+requires = ["flit_core >=3.7.1,<4"]
+
+[project]
+name = "btm"
+version = "0.1.0"
+description = ""
+requires-python = ">=3.10"
+classifiers = [ "Private :: Do Not Upload" ]
+dependencies = [
+    "dvc >= 2.55.0",
+    "dvc-gs",
+    "dvclive >= 2.0.0",
+    "matplotlib",
+    "optuna",
+    "pandas",
+    "pillow",
+    "scikit-learn",
+    "torch",
+    "torchvision",
+    "torchaudio",
+]
+
+[project.optional-dependencies]
+lint = [
+    "autopep8",
+    "flake8",
+    "isort",
+    "mypy",
+]
+test = [
+    "pytest",
+    "pytest-cov",
+]
+dev = [
+    "btm[test]",
+    "btm[lint]",
+    "ipykernel",
+    "jupyter",
+]
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-rA -q"
+testpaths = [
+    "tests"
+]
+
+[tool.flit.module]
+name = "btm"
