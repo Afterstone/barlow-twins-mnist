@@ -90,7 +90,7 @@ def train_barlow_twins(
     emb_dim_size = 32
     l1_loss_weight = trial.suggest_float("l1_loss_weight", 0.1, 10000.0, log=True)
     l2_loss_weight = trial.suggest_float("l2_loss_weight", 0.1, 10000.0, log=True)
-    aug_noise_sigma = trial.suggest_float("aug_noise_sigma", 1e-4, 1e-0, log=True)
+    aug_noise_sigma = 0.04
     target_lr = trial.suggest_float("lr_target", 1e-6, 1e-0, log=True)
     online_lr = trial.suggest_float("lr_online", 1e-6, 1e-0, log=True)
 
