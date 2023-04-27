@@ -144,8 +144,8 @@ def main():
 
     optuna.logging.get_logger("optuna").addHandler(logging.StreamHandler(sys.stdout))
     study_name = "barlow_twins"
-    storage_name = "sqlite:///{}.db".format(study_name)
-    sampler_path = Path(f'{study_name}.pkl')
+    storage_name = f"sqlite:///optuna/{study_name}.db"
+    sampler_path = Path(f'optuna/{study_name}.pkl')
     if not sampler_path.exists():
         sampler = optuna.samplers.TPESampler(multivariate=True)
         with open(sampler_path, 'wb') as f:
