@@ -15,23 +15,25 @@ from sklearn.metrics import accuracy_score, f1_score  # noqa: F401
 from torch.utils.data import DataLoader, TensorDataset
 from torchvision.datasets import MNIST
 from torchvision.transforms import ToTensor
+from lightning.pytorch.callbacks import ModelCheckpoint
 
 from .augmentations import apply_random_gaussian_noise
 # Import logistic regression
 from .models import LightningBarlowTwins
 import pickle
 from pathlib import Path
+import typing as t
 
 
-def get_train_val() -> tuple[TensorDataset, TensorDataset]:
+def get_train_val(train_val_split: float = 0.8) -> tuple[TensorDataset, TensorDataset, float, float]:
     train_dataset = MNIST('data', train=True, download=True, transform=ToTensor())
-    train_loader = DataLoader(train_dataset, batch_size=len(train_dataset), shuffle=True)
+    train_loader = DataLoader(train_dataset, batch_size=len(train_dataset), shuffle=False)
 
     X, y = next(iter(train_loader))
     perm = T.randperm(len(train_dataset))
     X, y = X[perm], y[perm]
 
-    split_idx = int(len(train_dataset) * 0.8)
+    split_idx = int(len(train_dataset) * train_val_split)
 
     X_train, y_train = X[:split_idx].cuda(), y[:split_idx].cuda()
     X_val, y_val = X[split_idx:].cuda(), y[split_idx:].cuda()
@@ -43,14 +45,40 @@ def get_train_val() -> tuple[TensorDataset, TensorDataset]:
     train_ds = TensorDataset(X_train, y_train)
     val_ds = TensorDataset(X_val, y_val)
 
-    return train_ds, val_ds
+    return train_ds, val_ds, mean, std
 
 
-def get_test() -> TensorDataset:
+def get_test(
+    mean: float,
+    std: float,
+) -> TensorDataset:
     test_dataset = MNIST('data', train=False, download=True, transform=ToTensor())
-    test_loader = DataLoader(test_dataset, batch_size=len(test_dataset), shuffle=True)
+    test_loader = DataLoader(test_dataset, batch_size=len(test_dataset), shuffle=False)
     X, y = next(iter(test_loader))
+    X, y = X.cuda(), y.cuda()
+    X = (X - mean) / std
     return TensorDataset(X.cuda(), y.cuda())
+
+
+def get_embeds(
+    device: str | T.device,
+    emb_dim_size: int,
+    data_loader: DataLoader,
+    encoder: T.nn.Module,
+    augmentations: list[T.nn.Module | t.Callable[..., T.Tensor]],
+) -> tuple[np.ndarray, np.ndarray]:
+    embs: np.ndarray = np.empty((0, emb_dim_size))
+    targets: np.ndarray = np.empty((0, 1))
+    for X, Y in data_loader:
+        X, Y = X.to(device), Y.to(device)
+
+        for aug in augmentations:
+            X = aug(X)
+
+        y_hat = encoder(X)
+        embs = np.vstack((embs, y_hat.cpu().detach().numpy()))
+        targets = np.vstack((targets, Y.cpu().detach().numpy().reshape(-1, 1)))
+    return embs, targets.ravel()
 
 
 def train_barlow_twins(
@@ -63,8 +91,8 @@ def train_barlow_twins(
     l1_loss_weight = trial.suggest_float("l1_loss_weight", 0.1, 10000.0, log=True)
     l2_loss_weight = trial.suggest_float("l2_loss_weight", 0.1, 10000.0, log=True)
     aug_noise_sigma = trial.suggest_float("aug_noise_sigma", 1e-4, 1e-0, log=True)
-    target_lr = trial.suggest_float("target_lr", 1e-6, 1e-0, log=True)
-    online_lr = trial.suggest_float("projector_lr", 1e-6, 1e-0, log=True)
+    target_lr = trial.suggest_float("lr_target", 1e-6, 1e-0, log=True)
+    online_lr = trial.suggest_float("lr_online", 1e-6, 1e-0, log=True)
 
     bt = LightningBarlowTwins(
         emb_dim_size=emb_dim_size,
@@ -80,13 +108,20 @@ def train_barlow_twins(
 
     logger = TensorBoardLogger("lightning_logs", name="hallo")
     trainer = pl.Trainer(
-        max_epochs=20,
+        max_epochs=10,
         accelerator="gpu",
         devices="auto",
         logger=logger,
-        # callbacks=[PyTorchLightningPruningCallback(trial, monitor="val_f1")],
+        callbacks=[
+            ModelCheckpoint(monitor="val_f1", mode="max", dirpath="checkpoints"),
+            # PyTorchLightningPruningCallback(trial, monitor="val_f1")
+        ],
     )
-    trainer.fit(model=bt, train_dataloaders=train_dl, val_dataloaders=val_dl)
+    trainer.fit(
+        model=bt,
+        train_dataloaders=train_dl,
+        val_dataloaders=val_dl,
+    )
 
     device = bt.device
     encoder = deepcopy(bt.target.encoder).to(device)
@@ -94,48 +129,20 @@ def train_barlow_twins(
     with T.no_grad():
         encoder.eval()
 
-        train_emb: np.ndarray = np.empty((0, emb_dim_size))
-        train_targets: np.ndarray = np.empty((0, 1))
-        for X_train, y_train in train_dl:
-            X_train, y_train = X_train.to(device), y_train.to(device)
-
-            for aug in augmentations:
-                X_train = aug(X_train)
-
-            y_hat = encoder(X_train)
-            train_emb = np.vstack((train_emb, y_hat.cpu().detach().numpy()))
-            train_targets = np.vstack((train_targets, y_train.cpu().detach().numpy().reshape(-1, 1)))
-
-        train_emb_mean, train_emb_std = train_emb.mean(axis=0), train_emb.std(axis=0)
-        train_emb = (train_emb - train_emb_mean) / train_emb_std
+        train_embs, train_targets = get_embeds(device, emb_dim_size, train_dl, encoder, augmentations)
+        test_embs, test_targets = get_embeds(device, emb_dim_size, test_dl, encoder, augmentations)
 
         lr = LogisticRegression(max_iter=1000)
-        lr.fit(train_emb, train_targets.ravel())
+        lr.fit(train_embs, train_targets.ravel())
 
-        emb_test: np.ndarray = np.empty((0, emb_dim_size))
-        emb_targets: np.ndarray = np.empty((0, 1))
-        for X_test, y_test in test_dl:
-            X_test, y_test = X_test.to(device), y_test.to(device)
-
-            for aug in augmentations:
-                X_test = aug(X_test)
-
-            y_hat = encoder(X_test)
-            emb_test = np.vstack((emb_test, y_hat.cpu().detach().numpy()))
-            emb_targets = np.vstack((emb_targets, y_test.cpu().detach().numpy().reshape(-1, 1)))
-
-        emb_test = (emb_test - train_emb_mean) / train_emb_std
-
-    y_hat = lr.predict(emb_test)
-    # test_acc = accuracy_score(emb_targets, y_hat)
-    test_f1 = f1_score(emb_targets, y_hat, average='weighted')
+        test_f1 = f1_score(test_targets, lr.predict(test_embs).ravel(), average='weighted')
 
     return float(test_f1)
 
 
 def main():
-    train_ds, val_ds = get_train_val()
-    test_ds = get_test()
+    train_ds, val_ds, train_mean, train_std = get_train_val()
+    test_ds = get_test(mean=train_mean, std=train_std)
 
     train_dl = DataLoader(train_ds, batch_size=512, shuffle=True)
     val_dl = DataLoader(val_ds, batch_size=512, shuffle=False)
