@@ -142,10 +142,11 @@ def main():
     test_dl = DataLoader(test_ds, batch_size=512, shuffle=False)
     objective = partial(train_barlow_twins, train_dl=train_dl, val_dl=val_dl, test_dl=test_dl)
 
-    optuna.logging.get_logger("optuna").addHandler(logging.StreamHandler(sys.stdout))
     study_name = "barlow_twins"
-    storage_name = f"sqlite:///optuna/{study_name}.db"
-    sampler_path = Path(f'optuna/{study_name}.pkl')
+    optuna_dir = Path("optuna")
+    optuna_dir.mkdir(parents=True, exist_ok=True)
+    storage_name = f"sqlite:///{optuna_dir}/{study_name}.db"
+    sampler_path = Path(f'./{optuna_dir}/{study_name}.pkl')
     if not sampler_path.exists():
         sampler = optuna.samplers.TPESampler(multivariate=True)
         with open(sampler_path, 'wb') as f:
@@ -154,6 +155,7 @@ def main():
         with open(sampler_path, 'rb') as f:
             sampler = pickle.load(f)
 
+    optuna.logging.get_logger("optuna").addHandler(logging.StreamHandler(sys.stdout))
     study = optuna.create_study(
         direction="maximize",
         storage=storage_name,
