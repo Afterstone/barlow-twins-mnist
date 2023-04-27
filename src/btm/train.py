@@ -15,7 +15,7 @@ from sklearn.metrics import accuracy_score, f1_score  # noqa: F401
 from torch.utils.data import DataLoader, TensorDataset
 from torchvision.datasets import MNIST
 from torchvision.transforms import ToTensor
-from lightning.pytorch.callbacks import ModelCheckpoint
+from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
 
 from .augmentations import apply_random_gaussian_noise
 # Import logistic regression
@@ -108,12 +108,14 @@ def train_barlow_twins(
 
     logger = TensorBoardLogger("lightning_logs", name="hallo")
     trainer = pl.Trainer(
-        max_epochs=10,
+        max_epochs=30,
         accelerator="gpu",
         devices="auto",
         logger=logger,
+        check_val_every_n_epoch=1,
         callbacks=[
             ModelCheckpoint(monitor="val_f1", mode="max", dirpath="checkpoints"),
+            EarlyStopping(monitor="val_f1", mode="max", patience=5),
             # PyTorchLightningPruningCallback(trial, monitor="val_f1")
         ],
     )
