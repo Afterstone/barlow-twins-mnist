@@ -1,12 +1,12 @@
-import torch as T
-import lightning.pytorch as pl
-
 import typing as t
-from .losses import CrossCorrelationLoss
 
+import lightning.pytorch as pl
+import torch as T
 from sklearn.linear_model import LogisticRegression
 # Import acuracy score
 from sklearn.metrics import accuracy_score, f1_score
+
+from .losses import CrossCorrelationLoss
 
 
 class Autoencoder(T.nn.Module):
@@ -53,8 +53,13 @@ class LightningBarlowTwins(pl.LightningModule):
         emb_dim_size: int = 10,
         l1_loss_weight: float = 0.0,
         l2_loss_weight: float = 0.0,
+        target_lr: float = 1e-3,
+        online_lr: float = 1e-2,
     ):
         super().__init__()
+
+        self.target_lr = target_lr
+        self.online_lr = online_lr
 
         self.emb_dim_size = emb_dim_size
         self.augmentations = augmentations
@@ -73,8 +78,8 @@ class LightningBarlowTwins(pl.LightningModule):
         self.val_targets: T.Tensor = T.empty((0,))
 
     def configure_optimizers(self):
-        opt_target = T.optim.Adam(self.target.parameters(), lr=1e-3, weight_decay=1e-5)
-        opt_online = T.optim.Adam(self.online.parameters(), lr=1e-2, weight_decay=1e-5)
+        opt_target = T.optim.Adam(self.target.parameters(), lr=self.target_lr, weight_decay=1e-5)
+        opt_online = T.optim.Adam(self.online.parameters(), lr=self.online_lr, weight_decay=1e-5)
 
         return [
             opt_online,
