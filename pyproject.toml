@@ -15,6 +15,7 @@ dependencies = [
     "lightning",
     "matplotlib",
     "optuna",
+    "optuna-dashboard",
     "pandas",
     "pillow",
     "scikit-learn",
