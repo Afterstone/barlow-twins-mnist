@@ -1,28 +1,25 @@
 import logging
+import pickle
 import sys
+import typing as t
 from copy import deepcopy
 from functools import partial
+from pathlib import Path
 
 import lightning.pytorch as pl
-import numpy as np
-import optuna
 import torch as T
 import torchvision.transforms as trfs  # noqa: F401
+from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger
-from sklearn.linear_model import LogisticRegression
-# Import accuracy score
 from sklearn.metrics import accuracy_score, f1_score  # noqa: F401
 from torch.utils.data import DataLoader, TensorDataset
 from torchvision.datasets import MNIST
 from torchvision.transforms import ToTensor
-from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
+
+import optuna
 
 from .augmentations import apply_random_gaussian_noise
-# Import logistic regression
-from .models import LightningBarlowTwins
-import pickle
-from pathlib import Path
-import typing as t
+from .models import LightningBarlowTwins, train_evaluator
 
 
 def get_train_val(train_val_split: float = 0.8) -> tuple[TensorDataset, TensorDataset, float, float]:
@@ -66,18 +63,18 @@ def get_embeds(
     data_loader: DataLoader,
     encoder: T.nn.Module,
     augmentations: list[T.nn.Module | t.Callable[..., T.Tensor]],
-) -> tuple[np.ndarray, np.ndarray]:
-    embs: np.ndarray = np.empty((0, emb_dim_size))
-    targets: np.ndarray = np.empty((0, 1))
-    for X, Y in data_loader:
-        X, Y = X.to(device), Y.to(device)
+) -> tuple[T.Tensor, T.Tensor]:
+    embs: T.Tensor = T.empty((0, emb_dim_size))
+    targets: T.Tensor = T.empty((0, 1))
+    for X, y in data_loader:
+        X, y = X.to(device), y
 
         for aug in augmentations:
             X = aug(X)
 
         y_hat = encoder(X)
-        embs = np.vstack((embs, y_hat.cpu().detach().numpy()))
-        targets = np.vstack((targets, Y.cpu().detach().numpy().reshape(-1, 1)))
+        embs = T.vstack((embs, y_hat.cpu()))
+        targets = T.vstack((targets, y.cpu().unsqueeze(1)))
     return embs, targets.ravel()
 
 
@@ -134,10 +131,16 @@ def train_barlow_twins(
         train_embs, train_targets = get_embeds(device, emb_dim_size, train_dl, encoder, augmentations)
         test_embs, test_targets = get_embeds(device, emb_dim_size, test_dl, encoder, augmentations)
 
-        lr = LogisticRegression(max_iter=1000)
-        lr.fit(train_embs, train_targets.ravel())
-
-        test_f1 = f1_score(test_targets, lr.predict(test_embs).ravel(), average='weighted')
+        with T.enable_grad():
+            eval_nn = train_evaluator(
+                device=device,
+                input_dims=emb_dim_size,
+                output_dims=10,
+                X=train_embs,
+                y=train_targets,
+            )
+        y_hat = T.argmax(eval_nn(test_embs.to(device)).cpu(), dim=1)
+        test_f1 = f1_score(test_targets.cpu(), y_hat, average="weighted")
 
     return float(test_f1)
 

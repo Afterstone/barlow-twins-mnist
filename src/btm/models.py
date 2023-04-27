@@ -2,8 +2,6 @@ import typing as t
 
 import lightning.pytorch as pl
 import torch as T
-from sklearn.linear_model import LogisticRegression
-# Import acuracy score
 from sklearn.metrics import accuracy_score, f1_score
 
 from .losses import CrossCorrelationLoss
@@ -44,6 +42,46 @@ class Autoencoder(T.nn.Module):
         z = self.encoder(x)
         x_hat = self.decoder(z)
         return x_hat, z
+
+
+class NNEvaluator(T.nn.Module):
+    def __init__(self, input_dim: int = 10, output_dim: int = 10):
+        super().__init__()
+
+        self.linear = T.nn.Linear(input_dim, output_dim)
+        self.softmax = T.nn.Softmax(dim=1)
+
+    def forward(self, x: T.Tensor) -> T.Tensor:
+        return self.softmax(self.linear(x))
+
+
+def train_evaluator(
+    device: str | T.device,
+    input_dims: int,
+    output_dims: int,
+    X: T.Tensor,
+    y: T.Tensor,
+    lr: float = 1e-3,
+) -> NNEvaluator:
+    eval_nn = NNEvaluator(input_dims, output_dims).to(device)
+
+    optimizer = T.optim.Adam(eval_nn.parameters(), lr=lr)
+    loss_fn = T.nn.CrossEntropyLoss()
+    batch_size = 64
+    for _ in range(5):
+        for start_idx in range(0, len(X), batch_size):
+            stop_idx = min(start_idx + batch_size, len(X))
+            X_batch = X[start_idx:stop_idx].to(device)
+            y_batch = y[start_idx:stop_idx].to(device)
+            y_batch_onehot = T.nn.functional.one_hot(y_batch.long(), num_classes=output_dims).float()
+
+            optimizer.zero_grad()
+            y_hat = eval_nn(X_batch)
+            loss = loss_fn(y_hat, y_batch_onehot)
+            loss.backward()
+            optimizer.step()
+
+    return eval_nn
 
 
 class LightningBarlowTwins(pl.LightningModule):
@@ -122,16 +160,24 @@ class LightningBarlowTwins(pl.LightningModule):
 
     def on_train_epoch_end(self) -> None:
         if len(self.train_embeddings) > 0:
-            with T.no_grad():
-                lr = LogisticRegression(max_iter=1000)
-                X_train = self.train_embeddings.detach().cpu().numpy()
-                y_train = self.train_targets.detach().cpu().numpy()
+            X_train = self.train_embeddings
+            y_train = self.train_targets
 
-                X_mean, X_std = X_train.mean(axis=0), X_train.std(axis=0)
-                X_train = (X_train - X_mean) / X_std
-                y_hat = lr.fit(X_train, y_train).predict(X_train)
+            eval_nn = train_evaluator(
+                device=self.device,
+                input_dims=self.emb_dim_size,
+                output_dims=10,
+                X=X_train,
+                y=y_train,
+            )
+
+            with T.no_grad():
+                eval_nn.eval()
+                y_hat = eval_nn(X_train.to(self.device))
+                y_hat = T.argmax(y_hat, dim=1).detach().cpu().numpy()
                 train_acc = accuracy_score(y_train, y_hat)
                 train_f1 = f1_score(y_train, y_hat, average='weighted')
+
                 self.log('train_acc', float(train_acc))
                 self.log('train_f1', float(train_f1))
 
@@ -164,20 +210,23 @@ class LightningBarlowTwins(pl.LightningModule):
 
     def on_validation_epoch_end(self) -> None:
         if len(self.val_embeddings) > 0 and len(self.train_embeddings) > 0:
+            with T.enable_grad():
+                eval_nn = train_evaluator(
+                    device=self.device,
+                    input_dims=self.emb_dim_size,
+                    output_dims=10,
+                    X=self.train_embeddings,
+                    y=self.train_targets,
+                )
+
+            X_val = self.val_embeddings
+            y_val = self.val_targets
+
             with T.no_grad():
-                lr = LogisticRegression(max_iter=1000)
-                X_train = self.train_embeddings.detach().cpu().numpy()
-                y_train = self.train_targets.detach().cpu().numpy()
-                X_val = self.val_embeddings.detach().cpu().numpy()
-                y_val = self.val_targets.detach().cpu().numpy()
-
-                X_mean, X_std = X_train.mean(axis=0), X_train.std(axis=0)
-                X_train = (X_train - X_mean) / X_std
-                X_val = (X_val - X_mean) / X_std
-
-                y_hat = lr.fit(X_train, y_train).predict(X_val)
-
+                y_hat = eval_nn(X_val.to(self.device))
+                y_hat = T.argmax(y_hat, dim=1).detach().cpu().numpy()
                 val_acc = accuracy_score(y_val, y_hat)
-                f1_score_val = f1_score(y_val, y_hat, average='weighted')
+                val_f1 = f1_score(y_val, y_hat, average='weighted')
+
                 self.log('val_acc', float(val_acc))
-                self.log('val_f1', float(f1_score_val))
+                self.log('val_f1', float(val_f1))
