@@ -12,14 +12,17 @@ dependencies = [
     "dvc >= 2.55.0",
     "dvc-gs",
     "dvclive >= 2.0.0",
+    "lightning",
     "matplotlib",
     "optuna",
     "pandas",
     "pillow",
     "scikit-learn",
+    "tensorboard",
     "torch",
-    "torchvision",
     "torchaudio",
+    "torchvision",
+    "torch-tb-profiler",
 ]
 
 [project.optional-dependencies]
