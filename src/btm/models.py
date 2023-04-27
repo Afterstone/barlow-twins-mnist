@@ -45,7 +45,7 @@ class Autoencoder(T.nn.Module):
 
 
 class NNEvaluator(T.nn.Module):
-    def __init__(self, input_dim: int = 10, output_dim: int = 10):
+    def __init__(self, input_dim: int, output_dim: int):
         super().__init__()
 
         self.linear = T.nn.Linear(input_dim, output_dim)
@@ -61,14 +61,15 @@ def train_evaluator(
     output_dims: int,
     X: T.Tensor,
     y: T.Tensor,
-    lr: float = 1e-3,
+    lr: float = 1e-2,
+    batch_size: int = 512,
+    epochs: int = 10,
 ) -> NNEvaluator:
     eval_nn = NNEvaluator(input_dims, output_dims).to(device)
 
     optimizer = T.optim.Adam(eval_nn.parameters(), lr=lr)
     loss_fn = T.nn.CrossEntropyLoss()
-    batch_size = 64
-    for _ in range(5):
+    for _ in range(epochs):
         for start_idx in range(0, len(X), batch_size):
             stop_idx = min(start_idx + batch_size, len(X))
             X_batch = X[start_idx:stop_idx].to(device)
