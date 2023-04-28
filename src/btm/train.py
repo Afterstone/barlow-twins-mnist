@@ -15,11 +15,12 @@ from sklearn.metrics import accuracy_score, f1_score  # noqa: F401
 from torch.utils.data import DataLoader, TensorDataset
 from torchvision.datasets import MNIST
 from torchvision.transforms import ToTensor
+from sklearn.linear_model import LogisticRegression
 
 import optuna
 
 from .augmentations import apply_random_gaussian_noise
-from .models import LightningBarlowTwins, train_evaluator
+from .models import LightningBarlowTwins
 
 
 def get_train_val(train_val_split: float = 0.8) -> tuple[TensorDataset, TensorDataset, float, float]:
@@ -80,16 +81,17 @@ def get_embeds(
 
 def train_barlow_twins(
     trial: optuna.Trial,
+    study_name: str,
     train_dl: DataLoader,
     val_dl: DataLoader,
     test_dl: DataLoader,
+    emb_dim_size: int = 64,
 ) -> float:
-    emb_dim_size = 32
-    l1_loss_weight = trial.suggest_float("l1_loss_weight", 0.1, 10000.0, log=True)
-    l2_loss_weight = trial.suggest_float("l2_loss_weight", 0.1, 10000.0, log=True)
+    l1_loss_weight = trial.suggest_float("l1_loss_weight", 0.1, 5000.0, log=True)
+    l2_loss_weight = trial.suggest_float("l2_loss_weight", 0.1, 5000.0, log=True)
     aug_noise_sigma = 0.04
-    target_lr = trial.suggest_float("lr_target", 1e-6, 1e-0, log=True)
-    online_lr = trial.suggest_float("lr_online", 1e-6, 1e-0, log=True)
+    target_lr = trial.suggest_float("lr_target", 1e-5, 1e-3, log=True)
+    online_lr = trial.suggest_float("lr_online", 1e-3, 1e-1, log=True)
 
     bt = LightningBarlowTwins(
         emb_dim_size=emb_dim_size,
@@ -103,15 +105,20 @@ def train_barlow_twins(
         ],
     ).to("cuda")
 
-    logger = TensorBoardLogger("lightning_logs", name="hallo")
+    logger = TensorBoardLogger("lightning_logs", name=f"{study_name}")
     trainer = pl.Trainer(
-        max_epochs=30,
+        max_epochs=50,
         accelerator="gpu",
         devices="auto",
         logger=logger,
         check_val_every_n_epoch=1,
         callbacks=[
-            ModelCheckpoint(monitor="val_f1", mode="max", dirpath="checkpoints"),
+            ModelCheckpoint(
+                monitor="val_f1",
+                mode="max",
+                dirpath="checkpoints",
+                filename=f"{study_name}_{{epoch:02d}}-{{val_f1:.2f}}"
+            ),
             EarlyStopping(monitor="val_f1", mode="max", patience=5),
             # PyTorchLightningPruningCallback(trial, monitor="val_f1")
         ],
@@ -129,18 +136,15 @@ def train_barlow_twins(
         encoder.eval()
 
         train_embs, train_targets = get_embeds(device, emb_dim_size, train_dl, encoder, augmentations)
-        test_embs, test_targets = get_embeds(device, emb_dim_size, test_dl, encoder, augmentations)
+        X_train, y_train = train_embs.cpu().detach().numpy(), train_targets.cpu().long().detach().long().numpy()
 
-        with T.enable_grad():
-            eval_nn = train_evaluator(
-                device=device,
-                input_dims=emb_dim_size,
-                output_dims=10,
-                X=train_embs,
-                y=train_targets,
-            )
-        y_hat = T.argmax(eval_nn(test_embs.to(device)).cpu(), dim=1)
-        test_f1 = f1_score(test_targets.cpu(), y_hat, average="weighted")
+        test_embs, test_targets = get_embeds(device, emb_dim_size, test_dl, encoder, augmentations)
+        X_test, y_test = test_embs.cpu().detach().numpy(), test_targets.cpu().long().detach().numpy()
+
+        lr = LogisticRegression(max_iter=1000, solver="newton-cholesky")
+        lr.fit(X_train, y_train)
+        y_hat = lr.predict(X_test)
+        test_f1 = f1_score(y_test, y_hat, average="weighted")
 
     return float(test_f1)
 
@@ -152,9 +156,8 @@ def main():
     train_dl = DataLoader(train_ds, batch_size=512, shuffle=True)
     val_dl = DataLoader(val_ds, batch_size=512, shuffle=False)
     test_dl = DataLoader(test_ds, batch_size=512, shuffle=False)
-    objective = partial(train_barlow_twins, train_dl=train_dl, val_dl=val_dl, test_dl=test_dl)
 
-    study_name = "barlow_twins"
+    study_name = "barlow_twins_emb64"
     optuna_dir = Path("optuna")
     optuna_dir.mkdir(parents=True, exist_ok=True)
     storage_name = f"sqlite:///{optuna_dir}/{study_name}.db"
@@ -166,6 +169,15 @@ def main():
     else:
         with open(sampler_path, 'rb') as f:
             sampler = pickle.load(f)
+
+    objective = partial(
+        train_barlow_twins,
+        train_dl=train_dl,
+        val_dl=val_dl,
+        test_dl=test_dl,
+        study_name=study_name,
+        emb_dim_size=64
+    )
 
     optuna.logging.get_logger("optuna").addHandler(logging.StreamHandler(sys.stdout))
     study = optuna.create_study(
