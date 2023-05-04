@@ -2,10 +2,11 @@ import typing as t
 
 import lightning.pytorch as pl
 import torch as T
-from sklearn.metrics import accuracy_score, f1_score
+from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 
 from .losses import CrossCorrelationLoss
 from sklearn.linear_model import LogisticRegression
+from dataclasses import dataclass
 
 
 class Autoencoder(T.nn.Module):
@@ -43,6 +44,14 @@ class Autoencoder(T.nn.Module):
         z = self.encoder(x)
         x_hat = self.decoder(z)
         return x_hat, z
+
+
+@dataclass
+class EvaluationResult:
+    acc: float
+    f1: float
+    loss: float
+    roc_auc: float
 
 
 class LightningBarlowTwins(pl.LightningModule):
@@ -163,23 +172,24 @@ class LightningBarlowTwins(pl.LightningModule):
 
     def on_validation_epoch_end(self) -> None:
         if len(self.val_embeddings) > 0 and len(self.train_embeddings) > 0:
-            val_acc, val_f1, val_logreg_loss = self.evaluate_on_task(
+            res = self.evaluate(
                 self.train_embeddings,
                 self.train_targets,
                 self.val_embeddings,
                 self.val_targets,
             )
-            self.log('val_acc', float(val_acc))
-            self.log('val_f1', float(val_f1))
-            self.log('val_logreg_loss', float(val_logreg_loss))
+            self.log('val_acc', res.acc)
+            self.log('val_f1', res.f1)
+            self.log('val_logreg_loss', res.loss)
+            self.log('val_roc_auc', res.roc_auc)
 
-    def evaluate_on_task(
+    def evaluate(
         self,
         X_train: T.Tensor,
         y_train: T.Tensor,
         X_val: T.Tensor,
         y_val: T.Tensor,
-    ) -> tuple[float, float, float]:
+    ) -> EvaluationResult:
         X_train_np = X_train.cpu().detach().numpy()
         y_train_np = y_train.cpu().long().detach().numpy()
         X_val_np = X_val.cpu().detach().numpy()
@@ -192,8 +202,16 @@ class LightningBarlowTwins(pl.LightningModule):
         val_acc = accuracy_score(y_val_np, y_hat)
         val_f1 = f1_score(y_val_np, y_hat, average='weighted')
 
-        y_probs = lr.predict_proba(X_val_np)
+        y_probs_np = lr.predict_proba(X_val_np)
+        y_probs = T.tensor(y_probs_np)
         y_val_onehot = T.nn.functional.one_hot(y_val.long(), num_classes=10).float()
-        logreg_loss = T.nn.functional.cross_entropy(T.tensor(y_probs), y_val_onehot)
+        logreg_loss = T.nn.functional.cross_entropy(y_probs, y_val_onehot)
 
-        return float(val_acc), float(val_f1), float(logreg_loss)
+        roc_auc = roc_auc_score(y_val_np, y_probs_np, multi_class='ovr', average='weighted')
+
+        return EvaluationResult(
+            acc=float(val_acc),
+            f1=float(val_f1),
+            loss=float(logreg_loss),
+            roc_auc=float(roc_auc),
+        )

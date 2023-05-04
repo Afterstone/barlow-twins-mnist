@@ -142,9 +142,9 @@ def train_barlow_twins(
         test_embs, test_targets = get_embeds(device, emb_dim_size, test_dl, encoder, augmentations)
         X_test, y_test = test_embs, test_targets.long()
 
-        _, _, loss = bt.evaluate_on_task(X_train, y_train, X_test, y_test)
+        res = bt.evaluate(X_train, y_train, X_test, y_test)
 
-    return float(loss)
+    return res.loss
 
 
 def main():
