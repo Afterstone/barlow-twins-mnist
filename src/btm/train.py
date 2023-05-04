@@ -10,7 +10,7 @@ import lightning.pytorch as pl
 import torch as T
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, Dataset, TensorDataset
 from torchvision.datasets import MNIST
 from torchvision.transforms import ToTensor
 
@@ -79,10 +79,11 @@ def get_embeds(
 def train_barlow_twins(
     trial: optuna.Trial,
     study_name: str,
-    train_dl: DataLoader,
-    val_dl: DataLoader,
-    test_dl: DataLoader,
+    train_ds: Dataset,
+    val_ds: Dataset,
+    test_ds: Dataset,
 ) -> float:
+    batch_size: int = trial.suggest_int("batch_size", 256, 4096, log=True)
     emb_dim_size: int = trial.suggest_int("emb_dim_size", 2, 512, log=True)
     l1_loss_weight = trial.suggest_float("l1_loss_weight", 0.1, 5000.0, log=True)
     l2_loss_weight = trial.suggest_float("l2_loss_weight", 0.1, 5000.0, log=True)
@@ -92,6 +93,10 @@ def train_barlow_twins(
     lambda_: float = trial.suggest_float("lambda_", 0.0, 1.0)
     masktensor_prob: float = trial.suggest_float("masktensor_prob", 0.0, 1.0)
     masktensor_block_size: int = trial.suggest_int("masktensor_block_size", 0, 28)
+
+    train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+    val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
+    test_dl = DataLoader(test_ds, batch_size=batch_size, shuffle=False)
 
     bt = LightningBarlowTwins(
         emb_dim_size=emb_dim_size,
@@ -108,7 +113,7 @@ def train_barlow_twins(
 
     logger = TensorBoardLogger("lightning_logs", name=f"{study_name}")
     trainer = pl.Trainer(
-        max_epochs=50,
+        max_epochs=100,
         accelerator="gpu",
         devices="auto",
         logger=logger,
@@ -151,10 +156,6 @@ def main():
     train_ds, val_ds, train_mean, train_std = get_train_val()
     test_ds = get_test(mean=train_mean, std=train_std)
 
-    train_dl = DataLoader(train_ds, batch_size=512, shuffle=True)
-    val_dl = DataLoader(val_ds, batch_size=512, shuffle=False)
-    test_dl = DataLoader(test_ds, batch_size=512, shuffle=False)
-
     study_name = "barlow_twins_seminar"
     optuna_dir = Path("optuna")
     optuna_dir.mkdir(parents=True, exist_ok=True)
@@ -170,9 +171,9 @@ def main():
 
     objective = partial(
         train_barlow_twins,
-        train_dl=train_dl,
-        val_dl=val_dl,
-        test_dl=test_dl,
+        train_ds=train_ds,
+        val_ds=val_ds,
+        test_ds=test_ds,
         study_name=study_name,
     )
 
