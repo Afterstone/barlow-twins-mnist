@@ -85,8 +85,8 @@ def train_barlow_twins(
     train_dl: DataLoader,
     val_dl: DataLoader,
     test_dl: DataLoader,
-    emb_dim_size: int = 64,
 ) -> float:
+    emb_dim_size: int = trial.suggest_int("emb_dim_size", 2, 512, log=True)
     l1_loss_weight = trial.suggest_float("l1_loss_weight", 0.1, 5000.0, log=True)
     l2_loss_weight = trial.suggest_float("l2_loss_weight", 0.1, 5000.0, log=True)
     aug_noise_sigma = 0.04
@@ -176,7 +176,6 @@ def main():
         val_dl=val_dl,
         test_dl=test_dl,
         study_name=study_name,
-        emb_dim_size=64
     )
 
     optuna.logging.get_logger("optuna").addHandler(logging.StreamHandler(sys.stdout))
