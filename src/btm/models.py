@@ -163,12 +163,15 @@ class LightningBarlowTwins(pl.LightningModule):
 
     def on_validation_epoch_end(self) -> None:
         if len(self.val_embeddings) > 0 and len(self.train_embeddings) > 0:
-            self.evaluate_on_task(
+            val_acc, val_f1, val_logreg_loss = self.evaluate_on_task(
                 self.train_embeddings,
                 self.train_targets,
                 self.val_embeddings,
                 self.val_targets,
             )
+            self.log('val_acc', float(val_acc))
+            self.log('val_f1', float(val_f1))
+            self.log('val_logreg_loss', float(val_logreg_loss))
 
     def evaluate_on_task(
         self,
@@ -187,14 +190,10 @@ class LightningBarlowTwins(pl.LightningModule):
         y_hat = lr.predict(X_val_np)
 
         val_acc = accuracy_score(y_val_np, y_hat)
-        self.log('val_acc', float(val_acc))
-
         val_f1 = f1_score(y_val_np, y_hat, average='weighted')
-        self.log('val_f1', float(val_f1))
 
         y_probs = lr.predict_proba(X_val_np)
         y_val_onehot = T.nn.functional.one_hot(y_val.long(), num_classes=10).float()
         logreg_loss = T.nn.functional.cross_entropy(T.tensor(y_probs), y_val_onehot)
-        self.log('val_logreg_loss', float(logreg_loss))
 
         return float(val_acc), float(val_f1), float(logreg_loss)
