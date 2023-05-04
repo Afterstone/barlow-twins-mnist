@@ -16,7 +16,7 @@ from torchvision.transforms import ToTensor
 
 import optuna
 
-from .augmentations import apply_random_gaussian_noise, MaskTensor
+from .augmentations import MaskTensor, apply_random_gaussian_noise
 from .models import LightningBarlowTwins
 
 

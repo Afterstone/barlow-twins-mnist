@@ -1,12 +1,12 @@
 import typing as t
+from dataclasses import dataclass
 
 import lightning.pytorch as pl
 import torch as T
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 
 from .losses import CrossCorrelationLoss
-from sklearn.linear_model import LogisticRegression
-from dataclasses import dataclass
 
 
 class Autoencoder(T.nn.Module):
