@@ -155,7 +155,7 @@ def main():
     val_dl = DataLoader(val_ds, batch_size=512, shuffle=False)
     test_dl = DataLoader(test_ds, batch_size=512, shuffle=False)
 
-    study_name = "barlow_twins_emb64"
+    study_name = "barlow_twins_seminar"
     optuna_dir = Path("optuna")
     optuna_dir.mkdir(parents=True, exist_ok=True)
     storage_name = f"sqlite:///{optuna_dir}/{study_name}.db"
