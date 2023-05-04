@@ -92,6 +92,7 @@ def train_barlow_twins(
     aug_noise_sigma = 0.04
     target_lr = trial.suggest_float("lr_target", 1e-5, 1e-3, log=True)
     online_lr = trial.suggest_float("lr_online", 1e-3, 1e-1, log=True)
+    lambda_: float = trial.suggest_float("lambda_", 0.0, 1.0)
 
     bt = LightningBarlowTwins(
         emb_dim_size=emb_dim_size,
@@ -99,6 +100,7 @@ def train_barlow_twins(
         online_lr=online_lr,
         l1_loss_weight=l1_loss_weight,
         l2_loss_weight=l2_loss_weight,
+        lambda_=lambda_,
         augmentations=[
             partial(apply_random_gaussian_noise, sigma=aug_noise_sigma, p=1.0),
             # trfs.RandomApply([trfs.GaussianBlur(kernel_size=3, sigma=(0.01, 1.0))], 0.5),

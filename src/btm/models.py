@@ -54,6 +54,7 @@ class LightningBarlowTwins(pl.LightningModule):
         l2_loss_weight: float = 0.0,
         target_lr: float = 1e-3,
         online_lr: float = 1e-2,
+        lambda_: float = 1.0,
     ):
         super().__init__()
 
@@ -69,7 +70,7 @@ class LightningBarlowTwins(pl.LightningModule):
         self.online = Autoencoder(emb_dim_size)
         self.target = Autoencoder(emb_dim_size)
 
-        self.loss_fn = CrossCorrelationLoss()
+        self.loss_fn = CrossCorrelationLoss(lambda_=lambda_)
 
         self.train_embeddings: T.Tensor = T.empty((0, self.emb_dim_size))
         self.train_targets: T.Tensor = T.empty((0,))
