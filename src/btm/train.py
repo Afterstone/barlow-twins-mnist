@@ -137,10 +137,10 @@ def train_barlow_twins(
         encoder.eval()
 
         train_embs, train_targets = get_embeds(device, emb_dim_size, train_dl, encoder, augmentations)
-        X_train, y_train = train_embs.cpu().detach().numpy(), train_targets.cpu().long().detach().long().numpy()
+        X_train, y_train = train_embs, train_targets.long()
 
         test_embs, test_targets = get_embeds(device, emb_dim_size, test_dl, encoder, augmentations)
-        X_test, y_test = test_embs.cpu().detach().numpy(), test_targets.cpu().long().detach().numpy()
+        X_test, y_test = test_embs, test_targets.long()
 
         _, _, loss = bt.evaluate_on_task(X_train, y_train, X_test, y_test)
 
