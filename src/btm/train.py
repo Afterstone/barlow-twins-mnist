@@ -16,7 +16,7 @@ from torchvision.transforms import ToTensor
 
 import optuna
 
-from .augmentations import apply_random_gaussian_noise
+from .augmentations import apply_random_gaussian_noise, MaskTensor
 from .models import LightningBarlowTwins
 
 
@@ -86,10 +86,12 @@ def train_barlow_twins(
     emb_dim_size: int = trial.suggest_int("emb_dim_size", 2, 512, log=True)
     l1_loss_weight = trial.suggest_float("l1_loss_weight", 0.1, 5000.0, log=True)
     l2_loss_weight = trial.suggest_float("l2_loss_weight", 0.1, 5000.0, log=True)
-    aug_noise_sigma = 0.04
+    aug_noise_sigma: float = trial.suggest_float("aug_noise_sigma", 0.0, 0.5)
     target_lr = trial.suggest_float("lr_target", 1e-5, 1e-3, log=True)
     online_lr = trial.suggest_float("lr_online", 1e-3, 1e-1, log=True)
     lambda_: float = trial.suggest_float("lambda_", 0.0, 1.0)
+    masktensor_prob: float = trial.suggest_float("masktensor_prob", 0.0, 1.0)
+    masktensor_block_size: int = trial.suggest_int("masktensor_block_size", 0, 28)
 
     bt = LightningBarlowTwins(
         emb_dim_size=emb_dim_size,
@@ -99,8 +101,8 @@ def train_barlow_twins(
         l2_loss_weight=l2_loss_weight,
         lambda_=lambda_,
         augmentations=[
+            MaskTensor(mask_prob=masktensor_prob, block_size=masktensor_block_size),
             partial(apply_random_gaussian_noise, sigma=aug_noise_sigma, p=1.0),
-            # trfs.RandomApply([trfs.GaussianBlur(kernel_size=3, sigma=(0.01, 1.0))], 0.5),
         ],
     ).to("cuda")
 
