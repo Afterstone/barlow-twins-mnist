@@ -176,3 +176,8 @@ class LightningBarlowTwins(pl.LightningModule):
 
             val_f1 = f1_score(y_val, y_hat, average='weighted')
             self.log('val_f1', float(val_f1))
+
+            y_probs = lr.predict_proba(X_val)
+            y_val_onehot = T.nn.functional.one_hot(T.tensor(y_val), num_classes=10)
+            logreg_loss = T.nn.CrossEntropyLoss()(T.tensor(y_probs), T.tensor(y_val_onehot))
+            self.log('val_logreg_loss', float(logreg_loss))
