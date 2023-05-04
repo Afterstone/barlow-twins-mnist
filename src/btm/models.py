@@ -163,22 +163,38 @@ class LightningBarlowTwins(pl.LightningModule):
 
     def on_validation_epoch_end(self) -> None:
         if len(self.val_embeddings) > 0 and len(self.train_embeddings) > 0:
-            X_train = self.train_embeddings.cpu().detach().numpy()
-            y_train = self.train_targets.cpu().long().detach().numpy()
-            X_val = self.val_embeddings.cpu().detach().numpy()
-            y_val = self.val_targets.cpu().long().detach().numpy()
+            self.evaluate_on_task(
+                self.train_embeddings,
+                self.train_targets,
+                self.val_embeddings,
+                self.val_targets,
+            )
 
-            lr = LogisticRegression(max_iter=1000, solver="newton-cholesky")
-            lr.fit(X_train, y_train)
-            y_hat = lr.predict(X_val)
+    def evaluate_on_task(
+        self,
+        X_train: T.Tensor,
+        y_train: T.Tensor,
+        X_val: T.Tensor,
+        y_val: T.Tensor,
+    ) -> tuple[float, float, float]:
+        X_train_np = X_train.cpu().detach().numpy()
+        y_train_np = y_train.cpu().long().detach().numpy()
+        X_val_np = X_val.cpu().detach().numpy()
+        y_val_np = y_val.cpu().long().detach().numpy()
 
-            val_acc = accuracy_score(y_val, y_hat)
-            self.log('val_acc', float(val_acc))
+        lr = LogisticRegression(max_iter=1000, solver="newton-cholesky")
+        lr.fit(X_train_np, y_train_np)
+        y_hat = lr.predict(X_val_np)
 
-            val_f1 = f1_score(y_val, y_hat, average='weighted')
-            self.log('val_f1', float(val_f1))
+        val_acc = accuracy_score(y_val_np, y_hat)
+        self.log('val_acc', float(val_acc))
 
-            y_probs = lr.predict_proba(X_val)
-            y_val_onehot = T.nn.functional.one_hot(T.tensor(y_val), num_classes=10)
-            logreg_loss = T.nn.CrossEntropyLoss()(T.tensor(y_probs), T.tensor(y_val_onehot))
-            self.log('val_logreg_loss', float(logreg_loss))
+        val_f1 = f1_score(y_val_np, y_hat, average='weighted')
+        self.log('val_f1', float(val_f1))
+
+        y_probs = lr.predict_proba(X_val_np)
+        y_val_onehot = T.nn.functional.one_hot(y_val.long(), num_classes=10).float()
+        logreg_loss = T.nn.functional.cross_entropy(T.tensor(y_probs), y_val_onehot)
+        self.log('val_logreg_loss', float(logreg_loss))
+
+        return float(val_acc), float(val_f1), float(logreg_loss)

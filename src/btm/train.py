@@ -8,14 +8,11 @@ from pathlib import Path
 
 import lightning.pytorch as pl
 import torch as T
-import torchvision.transforms as trfs  # noqa: F401
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger
-from sklearn.metrics import accuracy_score, f1_score  # noqa: F401
 from torch.utils.data import DataLoader, TensorDataset
 from torchvision.datasets import MNIST
 from torchvision.transforms import ToTensor
-from sklearn.linear_model import LogisticRegression
 
 import optuna
 
@@ -116,12 +113,12 @@ def train_barlow_twins(
         check_val_every_n_epoch=1,
         callbacks=[
             ModelCheckpoint(
-                monitor="val_f1",
-                mode="max",
+                monitor="val_logreg_loss",
+                mode="min",
                 dirpath="checkpoints",
                 filename=f"{study_name}_{{epoch:02d}}-{{val_f1:.2f}}"
             ),
-            EarlyStopping(monitor="val_f1", mode="max", patience=5),
+            EarlyStopping(monitor="val_logreg_loss", mode="min", patience=5),
             # PyTorchLightningPruningCallback(trial, monitor="val_f1")
         ],
     )
@@ -143,12 +140,9 @@ def train_barlow_twins(
         test_embs, test_targets = get_embeds(device, emb_dim_size, test_dl, encoder, augmentations)
         X_test, y_test = test_embs.cpu().detach().numpy(), test_targets.cpu().long().detach().numpy()
 
-        lr = LogisticRegression(max_iter=1000, solver="newton-cholesky")
-        lr.fit(X_train, y_train)
-        y_hat = lr.predict(X_test)
-        test_f1 = f1_score(y_test, y_hat, average="weighted")
+        _, _, loss = bt.evaluate_on_task(X_train, y_train, X_test, y_test)
 
-    return float(test_f1)
+    return float(loss)
 
 
 def main():
@@ -182,7 +176,7 @@ def main():
 
     optuna.logging.get_logger("optuna").addHandler(logging.StreamHandler(sys.stdout))
     study = optuna.create_study(
-        direction="maximize",
+        direction=optuna.study.StudyDirection.MINIMIZE,
         storage=storage_name,
         study_name=study_name,
         load_if_exists=True,
